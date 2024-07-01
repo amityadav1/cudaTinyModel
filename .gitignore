@@ -4,3 +4,4 @@
 *.ptx
 *.cubin
 *.fatbin
+cuda_tiny_model
