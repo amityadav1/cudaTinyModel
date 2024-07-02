@@ -8,6 +8,15 @@ The model takes a string as input and predicts the next character in the string.
 
 The model is trained using 'names' from an input text file. The current implementation **ONLY** trains the model. The output shows loss reducing with each training epoch. 
 
+The output.text contains an output from one training run. 
+
+Future Improvements:
+* Add optimizers like Adam for better training efficiency and stability.
+* Add model validation and evaluation steps.
+* Improve model parameter initialization using (use Xavier etc).
+* Add regularization and batch norm.
+* Add inference functionalaity. 
+
 ## Code Organization
 
 ```bin/```
