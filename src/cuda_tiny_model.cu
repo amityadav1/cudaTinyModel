@@ -360,7 +360,7 @@ void testConvolution() {
 __host__ std::string parseCommandLineArguments(int argc, char *argv[])
 {
     std::cout << "Parsing CLI arguments\n";
-    std::string inputFile = "names.txt";
+    std::string inputFile = "data/names.txt";
 
     for (int i = 1; i < argc; i++)
     {

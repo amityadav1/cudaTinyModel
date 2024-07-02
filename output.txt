@@ -1,415 +1,414 @@
 coder@d454f17507c2:~/project/cudaTinyModel$ make clean build run 
-rm -f cuda_tiny_model embedding *log.txt
-nvcc cuda_tiny_model.cu  --extended-lambda --std c++17 `pkg-config opencv --cflags --libs` -o cuda_tiny_model -Wno-deprecated-gpu-targets -I/usr/include/opencv4/opencv -I/usr/include/opencv4 -lopencv_stitching -lopencv_aruco -lopencv_bgsegm -lopencv_bioinspired -lopencv_ccalib -lopencv_dnn_objdetect -lopencv_dnn_superres -lopencv_dpm -lopencv_highgui -lopencv_face -lopencv_freetype -lopencv_fuzzy -lopencv_hdf -lopencv_hfs -lopencv_img_hash -lopencv_line_descriptor -lopencv_quality -lopencv_reg -lopencv_rgbd -lopencv_saliency -lopencv_shape -lopencv_stereo -lopencv_structured_light -lopencv_phase_unwrapping -lopencv_superres -lopencv_optflow -lopencv_surface_matching -lopencv_tracking -lopencv_datasets -lopencv_text -lopencv_dnn -lopencv_plot -lopencv_ml -lopencv_videostab -lopencv_videoio -lopencv_viz -lopencv_ximgproc -lopencv_video -lopencv_xobjdetect -lopencv_objdetect -lopencv_calib3d -lopencv_imgcodecs -lopencv_features2d -lopencv_flann -lopencv_xphoto -lopencv_photo -lopencv_imgproc -lopencv_core -I/usr/local/cuda/include -lcuda  -lcudnn -lcutensor -lcublas
-./cuda_tiny_model 
+rm -f ./bin/cuda_tiny_model *log.txt
+nvcc src/cuda_tiny_model.cu  --extended-lambda --std c++17 `pkg-config opencv --cflags --libs` -o ./bin/cuda_tiny_model -Wno-deprecated-gpu-targets -I/usr/include/opencv4/opencv -I/usr/include/opencv4 -lopencv_stitching -lopencv_aruco -lopencv_bgsegm -lopencv_bioinspired -lopencv_ccalib -lopencv_dnn_objdetect -lopencv_dnn_superres -lopencv_dpm -lopencv_highgui -lopencv_face -lopencv_freetype -lopencv_fuzzy -lopencv_hdf -lopencv_hfs -lopencv_img_hash -lopencv_line_descriptor -lopencv_quality -lopencv_reg -lopencv_rgbd -lopencv_saliency -lopencv_shape -lopencv_stereo -lopencv_structured_light -lopencv_phase_unwrapping -lopencv_superres -lopencv_optflow -lopencv_surface_matching -lopencv_tracking -lopencv_datasets -lopencv_text -lopencv_dnn -lopencv_plot -lopencv_ml -lopencv_videostab -lopencv_videoio -lopencv_viz -lopencv_ximgproc -lopencv_video -lopencv_xobjdetect -lopencv_objdetect -lopencv_calib3d -lopencv_imgcodecs -lopencv_features2d -lopencv_flann -lopencv_xphoto -lopencv_photo -lopencv_imgproc -lopencv_core -I/usr/local/cuda/include -lcuda  -lcudnn -lcutensor -lcublas
+./bin/cuda_tiny_model 
 CUDA Runtime Version: 11.3
 CUDA Driver Version: 12.0
 cuDNN Version: 8.2.0
 Parsing CLI arguments
-input File Name: names.txt
+input File Name: data/names.txt
 Input Data size 32033
 Vocab Size is 27
 25626, 28829
-.,.,.,.,.,.,.,.,.,.,.,.,.,.,.,.,--->a
-.,.,.,.,.,.,.,.,.,.,.,.,.,.,.,a,--->m
-.,.,.,.,.,.,.,.,.,.,.,.,.,.,a,m,--->r
-.,.,.,.,.,.,.,.,.,.,.,.,.,a,m,r,--->a
-.,.,.,.,.,.,.,.,.,.,.,.,a,m,r,a,--->n
-.,.,.,.,.,.,.,.,.,.,.,a,m,r,a,n,--->.
-.,.,.,.,.,.,.,.,.,.,.,.,.,.,.,.,--->m
-.,.,.,.,.,.,.,.,.,.,.,.,.,.,.,m,--->a
-.,.,.,.,.,.,.,.,.,.,.,.,.,.,m,a,--->r
-.,.,.,.,.,.,.,.,.,.,.,.,.,m,a,r,--->i
-.,.,.,.,.,.,.,.,.,.,.,.,m,a,r,i,--->l
-.,.,.,.,.,.,.,.,.,.,.,m,a,r,i,l,--->y
-.,.,.,.,.,.,.,.,.,.,m,a,r,i,l,y,--->n
-.,.,.,.,.,.,.,.,.,m,a,r,i,l,y,n,--->.
-.,.,.,.,.,.,.,.,.,.,.,.,.,.,.,.,--->g
-.,.,.,.,.,.,.,.,.,.,.,.,.,.,.,g,--->r
-.,.,.,.,.,.,.,.,.,.,.,.,.,.,g,r,--->e
-.,.,.,.,.,.,.,.,.,.,.,.,.,g,r,e,--->y
-.,.,.,.,.,.,.,.,.,.,.,.,g,r,e,y,--->.
-.,.,.,.,.,.,.,.,.,.,.,.,.,.,.,.,--->a
+.,.,.,.,.,.,.,.,.,.,.,.,.,.,.,.,--->e
+.,.,.,.,.,.,.,.,.,.,.,.,.,.,.,e,--->m
+.,.,.,.,.,.,.,.,.,.,.,.,.,.,e,m,--->a
+.,.,.,.,.,.,.,.,.,.,.,.,.,e,m,a,--->l
+.,.,.,.,.,.,.,.,.,.,.,.,e,m,a,l,--->e
+.,.,.,.,.,.,.,.,.,.,.,e,m,a,l,e,--->i
+.,.,.,.,.,.,.,.,.,.,e,m,a,l,e,i,--->g
+.,.,.,.,.,.,.,.,.,e,m,a,l,e,i,g,--->h
+.,.,.,.,.,.,.,.,e,m,a,l,e,i,g,h,--->.
+.,.,.,.,.,.,.,.,.,.,.,.,.,.,.,.,--->j
+.,.,.,.,.,.,.,.,.,.,.,.,.,.,.,j,--->a
+.,.,.,.,.,.,.,.,.,.,.,.,.,.,j,a,--->e
+.,.,.,.,.,.,.,.,.,.,.,.,.,j,a,e,--->l
+.,.,.,.,.,.,.,.,.,.,.,.,j,a,e,l,--->e
+.,.,.,.,.,.,.,.,.,.,.,j,a,e,l,e,--->e
+.,.,.,.,.,.,.,.,.,.,j,a,e,l,e,e,--->n
+.,.,.,.,.,.,.,.,.,j,a,e,l,e,e,n,--->.
+.,.,.,.,.,.,.,.,.,.,.,.,.,.,.,.,--->e
+.,.,.,.,.,.,.,.,.,.,.,.,.,.,.,e,--->v
+.,.,.,.,.,.,.,.,.,.,.,.,.,.,e,v,--->i
 Copying input data to GPU
-e,y,.,a,.,.,.,.,.,.,.,.,.,.,.,.,--->a
-.,.,.,.,.,.,.,.,.,.,.,.,.,.,.,a,--->m
-.,.,.,.,.,.,.,.,.,.,.,.,.,.,a,m,--->r
-.,.,.,.,.,.,.,.,.,.,.,.,.,a,m,r,--->a
-.,.,.,.,.,.,.,.,.,.,.,.,a,m,r,a,--->n
-.,.,.,.,.,.,.,.,.,.,.,a,m,r,a,n,--->.
-.,.,.,.,.,.,.,.,.,.,.,.,.,.,.,.,--->m
-.,.,.,.,.,.,.,.,.,.,.,.,.,.,.,m,--->a
-.,.,.,.,.,.,.,.,.,.,.,.,.,.,m,a,--->r
-.,.,.,.,.,.,.,.,.,.,.,.,.,m,a,r,--->i
-.,.,.,.,.,.,.,.,.,.,.,.,m,a,r,i,--->l
-.,.,.,.,.,.,.,.,.,.,.,m,a,r,i,l,--->y
-.,.,.,.,.,.,.,.,.,.,m,a,r,i,l,y,--->n
-.,.,.,.,.,.,.,.,.,m,a,r,i,l,y,n,--->.
-.,.,.,.,.,.,.,.,.,.,.,.,.,.,.,.,--->g
-.,.,.,.,.,.,.,.,.,.,.,.,.,.,.,g,--->r
-.,.,.,.,.,.,.,.,.,.,.,.,.,.,g,r,--->e
-.,.,.,.,.,.,.,.,.,.,.,.,.,g,r,e,--->y
-.,.,.,.,.,.,.,.,.,.,.,.,g,r,e,y,--->.
-.,.,.,.,.,.,.,.,.,.,.,.,.,.,.,.,--->a
+.,e,v,i,.,.,.,.,.,.,.,.,.,.,.,.,--->e
+.,.,.,.,.,.,.,.,.,.,.,.,.,.,.,e,--->m
+.,.,.,.,.,.,.,.,.,.,.,.,.,.,e,m,--->a
+.,.,.,.,.,.,.,.,.,.,.,.,.,e,m,a,--->l
+.,.,.,.,.,.,.,.,.,.,.,.,e,m,a,l,--->e
+.,.,.,.,.,.,.,.,.,.,.,e,m,a,l,e,--->i
+.,.,.,.,.,.,.,.,.,.,e,m,a,l,e,i,--->g
+.,.,.,.,.,.,.,.,.,e,m,a,l,e,i,g,--->h
+.,.,.,.,.,.,.,.,e,m,a,l,e,i,g,h,--->.
+.,.,.,.,.,.,.,.,.,.,.,.,.,.,.,.,--->j
+.,.,.,.,.,.,.,.,.,.,.,.,.,.,.,j,--->a
+.,.,.,.,.,.,.,.,.,.,.,.,.,.,j,a,--->e
+.,.,.,.,.,.,.,.,.,.,.,.,.,j,a,e,--->l
+.,.,.,.,.,.,.,.,.,.,.,.,j,a,e,l,--->e
+.,.,.,.,.,.,.,.,.,.,.,j,a,e,l,e,--->e
+.,.,.,.,.,.,.,.,.,.,j,a,e,l,e,e,--->n
+.,.,.,.,.,.,.,.,.,j,a,e,l,e,e,n,--->.
+.,.,.,.,.,.,.,.,.,.,.,.,.,.,.,.,--->e
+.,.,.,.,.,.,.,.,.,.,.,.,.,.,.,e,--->v
+.,.,.,.,.,.,.,.,.,.,.,.,.,.,e,v,--->i
 Allocated workspace size: 131072 bytes
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 3.29419
+Cross-Entropy Loss: 3.33637
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 3.28116
+Cross-Entropy Loss: 3.32724
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 3.29085
+Cross-Entropy Loss: 3.3037
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 3.25979
+Cross-Entropy Loss: 3.28049
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 3.27979
+Cross-Entropy Loss: 3.27757
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 3.26788
+Cross-Entropy Loss: 3.26108
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 3.25665
+Cross-Entropy Loss: 3.25403
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 3.25419
+Cross-Entropy Loss: 3.23086
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 3.2391
+Cross-Entropy Loss: 3.22724
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 3.23351
+Cross-Entropy Loss: 3.22438
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 3.23221
+Cross-Entropy Loss: 3.21098
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 3.21358
+Cross-Entropy Loss: 3.19074
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 3.20604
+Cross-Entropy Loss: 3.16581
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 3.20968
+Cross-Entropy Loss: 3.16604
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 3.1969
+Cross-Entropy Loss: 3.15927
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 3.17988
+Cross-Entropy Loss: 3.16013
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 3.17671
+Cross-Entropy Loss: 3.13411
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 3.1786
+Cross-Entropy Loss: 3.10803
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 3.17831
+Cross-Entropy Loss: 3.09479
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 3.1555
+Cross-Entropy Loss: 3.10152
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 3.16667
+Cross-Entropy Loss: 3.06989
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 3.16466
+Cross-Entropy Loss: 3.07097
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 3.14638
+Cross-Entropy Loss: 3.04136
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 3.12231
+Cross-Entropy Loss: 3.06275
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 3.13179
+Cross-Entropy Loss: 3.02744
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 3.12264
+Cross-Entropy Loss: 3.02813
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 3.11202
+Cross-Entropy Loss: 3.01156
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 3.11482
+Cross-Entropy Loss: 3.00153
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 3.09336
+Cross-Entropy Loss: 3.00324
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 3.09838
+Cross-Entropy Loss: 2.96637
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 3.0763
+Cross-Entropy Loss: 2.98037
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 3.07102
+Cross-Entropy Loss: 2.95185
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 3.08341
+Cross-Entropy Loss: 2.95318
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 3.07899
+Cross-Entropy Loss: 2.91551
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 3.06357
+Cross-Entropy Loss: 2.90741
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 3.05152
+Cross-Entropy Loss: 2.89992
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 3.04655
+Cross-Entropy Loss: 2.92374
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 3.03079
+Cross-Entropy Loss: 2.91545
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 3.03192
+Cross-Entropy Loss: 2.85275
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 3.02834
+Cross-Entropy Loss: 2.84331
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 3.02816
+Cross-Entropy Loss: 2.85563
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 3.01957
+Cross-Entropy Loss: 2.84181
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 3.01389
+Cross-Entropy Loss: 2.87483
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.99509
+Cross-Entropy Loss: 2.81743
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.99517
+Cross-Entropy Loss: 2.8097
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.97293
+Cross-Entropy Loss: 2.7794
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.9717
+Cross-Entropy Loss: 2.77533
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.97531
+Cross-Entropy Loss: 2.76851
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.97069
+Cross-Entropy Loss: 2.76027
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.96649
+Cross-Entropy Loss: 2.75479
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.94734
+Cross-Entropy Loss: 2.71934
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.93366
+Cross-Entropy Loss: 2.71568
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.95542
+Cross-Entropy Loss: 2.70856
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.93748
+Cross-Entropy Loss: 2.73035
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.9634
+Cross-Entropy Loss: 2.69406
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.92612
+Cross-Entropy Loss: 2.66168
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.9249
+Cross-Entropy Loss: 2.69619
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.92195
+Cross-Entropy Loss: 2.67253
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.92314
+Cross-Entropy Loss: 2.6548
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.90697
+Cross-Entropy Loss: 2.67716
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.88326
+Cross-Entropy Loss: 2.61536
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.8696
+Cross-Entropy Loss: 2.63708
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.87175
+Cross-Entropy Loss: 2.61832
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.85724
+Cross-Entropy Loss: 2.621
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.87586
+Cross-Entropy Loss: 2.61109
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.86125
+Cross-Entropy Loss: 2.58894
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.8605
+Cross-Entropy Loss: 2.59472
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.84957
+Cross-Entropy Loss: 2.5721
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.85603
+Cross-Entropy Loss: 2.56974
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.8329
+Cross-Entropy Loss: 2.59004
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.84154
+Cross-Entropy Loss: 2.55997
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.82136
+Cross-Entropy Loss: 2.50821
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.82725
+Cross-Entropy Loss: 2.55007
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.81694
+Cross-Entropy Loss: 2.54827
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.79933
+Cross-Entropy Loss: 2.53408
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.81745
+Cross-Entropy Loss: 2.52531
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.79677
+Cross-Entropy Loss: 2.49952
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.79098
+Cross-Entropy Loss: 2.51631
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.78166
+Cross-Entropy Loss: 2.51542
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.7741
+Cross-Entropy Loss: 2.49178
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.78868
+Cross-Entropy Loss: 2.50969
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.77551
+Cross-Entropy Loss: 2.49866
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.76664
+Cross-Entropy Loss: 2.47548
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.77158
+Cross-Entropy Loss: 2.52091
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.75534
+Cross-Entropy Loss: 2.50417
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.76505
+Cross-Entropy Loss: 2.49677
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.75392
+Cross-Entropy Loss: 2.47708
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.74313
+Cross-Entropy Loss: 2.48903
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.74441
+Cross-Entropy Loss: 2.47659
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.76485
+Cross-Entropy Loss: 2.48724
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.74841
+Cross-Entropy Loss: 2.47371
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.74922
+Cross-Entropy Loss: 2.47689
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.74024
+Cross-Entropy Loss: 2.44729
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.73004
+Cross-Entropy Loss: 2.42913
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.70668
+Cross-Entropy Loss: 2.44146
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.72735
+Cross-Entropy Loss: 2.48598
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.69795
+Cross-Entropy Loss: 2.46494
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.69676
+Cross-Entropy Loss: 2.44202
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.68061
+Cross-Entropy Loss: 2.47638
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.709
+Cross-Entropy Loss: 2.46186
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.7104
+Cross-Entropy Loss: 2.47493
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.68989
+Cross-Entropy Loss: 2.45015
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.69372
+Cross-Entropy Loss: 2.4718
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.69988
+Cross-Entropy Loss: 2.48576
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.71239
+Cross-Entropy Loss: 2.46571
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.70132
+Cross-Entropy Loss: 2.45958
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.6958
+Cross-Entropy Loss: 2.47403
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.68786
+Cross-Entropy Loss: 2.47989
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.68311
+Cross-Entropy Loss: 2.47645
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.68124
+Cross-Entropy Loss: 2.46273
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.69895
+Cross-Entropy Loss: 2.48918
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.71096
+Cross-Entropy Loss: 2.51918
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.66235
+Cross-Entropy Loss: 2.48736
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.70053
+Cross-Entropy Loss: 2.49162
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.67751
+Cross-Entropy Loss: 2.48532
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.6831
+Cross-Entropy Loss: 2.51488
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.67162
+Cross-Entropy Loss: 2.4811
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.69785
+Cross-Entropy Loss: 2.5125
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.68494
+Cross-Entropy Loss: 2.47105
 Generating random indices for training data minibatch
 Generating training data minibatch
-Cross-Entropy Loss: 2.65448
-coder@d454f17507c2:~/project/cudaTinyModel$ 
+Cross-Entropy Loss: 2.49727

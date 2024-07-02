@@ -6,3 +6,4 @@
 *.fatbin
 cuda_tiny_model
 Observations.txt
+cudnnlog.txt
