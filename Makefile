@@ -23,10 +23,10 @@ LDFLAGS += $(shell pkg-config --libs --static opencv)
 all: clean build
 
 build: cuda_tiny_model.cu
-	$(CXX) cuda_tiny_model.cu --std c++17 `pkg-config opencv --cflags --libs` -o cuda_tiny_model -Wno-deprecated-gpu-targets $(CXXFLAGS) -I/usr/local/cuda/include -lcuda -lcutensor
+	$(CXX) cuda_tiny_model.cu  --extended-lambda --std c++17 `pkg-config opencv --cflags --libs` -o cuda_tiny_model -Wno-deprecated-gpu-targets $(CXXFLAGS) -I/usr/local/cuda/include -lcuda  -lcudnn -lcutensor -lcublas
 
 run:
 	./cuda_tiny_model $(ARGS)
 
 clean:
-	rm -f cuda_tiny_model output*.txt 
+	rm -f cuda_tiny_model embedding output*.txt *log.txt
