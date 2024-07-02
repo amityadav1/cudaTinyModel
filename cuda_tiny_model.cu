@@ -34,7 +34,7 @@ const int batch_size = 32; // B
 const int n_embed = 64;  // C
 const int n_hidden = 100; // H
 int vocab_size = 0; // V
-const int max_steps = 100;
+const int max_steps = 120;
 float learning_rate = 0.0001f;
 
 const int threadsPerBlock = 256;
@@ -356,7 +356,27 @@ void testConvolution() {
     cudnnDestroy(cudnnHandle);
 }
 
-int main() {
+
+__host__ std::string parseCommandLineArguments(int argc, char *argv[])
+{
+    std::cout << "Parsing CLI arguments\n";
+    std::string inputFile = "names.txt";
+
+    for (int i = 1; i < argc; i++)
+    {
+        std::string option(argv[i]);
+        i++;
+        std::string value(argv[i]);
+        if (option.compare("-i") == 0)
+        {
+            inputFile = value;
+        }
+    }
+    std::cout << "input File Name: " << inputFile << "\n";
+    return {inputFile};
+}
+
+int main(int argc, char *argv[]) {
     printVersions();
     // testConvolution();
 
@@ -366,7 +386,7 @@ int main() {
     * out of the text, 
     * Assign indexes to the vocabulary (tokens). 
     */
-    std::string filename = "names.txt";
+    std::string filename = parseCommandLineArguments(argc, argv);
 
     // Read and split lines from the file
     std::vector<std::string> words = readAndSplitLines(filename);
@@ -435,6 +455,10 @@ int main() {
     }
 
 
+    /**
+    * Part 2: Allocate all the required variables, host and device
+    * memory, tensor and operation descriptors.
+    */
     // Set up Array to hold indices for minibatches of training data
     int *d_idx;
     CHECK_CUDA(cudaMalloc(&d_idx, batch_size * sizeof(int)));
@@ -606,6 +630,11 @@ int main() {
     cudaMalloc((void **)&devStates, batch_size * sizeof(curandState));
     setup_kernel<<<(batch_size + threadsPerBlock - 1) / threadsPerBlock, threadsPerBlock>>>(devStates, 2147483647);
     
+
+
+    /**
+    * Part 3: Run the training loop for the neural network.
+    */
     // Training loop
     for (int i = 0; i < max_steps; ++i) {
 

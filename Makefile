@@ -29,4 +29,4 @@ run:
 	./cuda_tiny_model $(ARGS)
 
 clean:
-	rm -f cuda_tiny_model embedding output*.txt *log.txt
+	rm -f cuda_tiny_model embedding *log.txt
