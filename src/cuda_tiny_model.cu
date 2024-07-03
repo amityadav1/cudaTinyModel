@@ -41,6 +41,8 @@ const int threadsPerBlock = 256;
 
 
 void testConvolution();
+void checkDataCopyToGPU(int *Xtr, int Xtr_size, int *Ytr, int *d_Xtr, int *d_Ytr, std::map<int, char>& itos);
+void printRandomIndices(int *d_idx, std::map<int, char>& itos);
 
 #define CHECK_CUDA(call)                                                     \
     {                                                                        \
@@ -157,6 +159,24 @@ __global__ void computeEmbeddingGradients(float *d_dXembd, int *d_X, float *d_dE
             atomicAdd(&d_dEmbd[token * n_embed + j], 
                       d_dXembd[batch_idx * block_size * n_embed + seq_idx * n_embed + j]);
         }
+    }
+}
+
+
+// Find the character with the max probability
+__global__ void findMaxIndex(float* array, int size, int* maxIndex) {
+    if (threadIdx.x == 0) {  // Only the first thread does the work
+        float maxVal = array[0];
+        int maxIdx = 0;
+
+        for (int i = 1; i < size; ++i) {
+            if (array[i] > maxVal) {
+                maxVal = array[i];
+                maxIdx = i;
+            }
+        }
+
+        *maxIndex = maxIdx;
     }
 }
 
@@ -288,8 +308,6 @@ void printVersions() {
               << (cudnnVersion % 1000) / 100 << "." 
               << (cudnnVersion % 100) / 10 << std::endl;
 }
-
-
 
 
 __host__ std::string parseCommandLineArguments(int argc, char *argv[])
@@ -512,7 +530,7 @@ __host__ void backpropagation_and_update(
     updateParametersKernel<<<(n_hidden + threadsPerBlock - 1) / threadsPerBlock, threadsPerBlock>>>(d_b1, d_db1, learning_rate, n_hidden);
     updateParametersKernel<<<(vocab_size * n_embed + threadsPerBlock - 1) / threadsPerBlock, threadsPerBlock>>>(d_embd, d_dEmbd, learning_rate, vocab_size * n_embed);
 
-    // Zero out the gradients
+    // 7. Zero out the gradients
     CHECK_CUDA(cudaMemset(d_dEmbd, 0, vocab_size * n_embed * sizeof(float)));
     CHECK_CUDA(cudaMemset(d_dW1, 0, n_hidden * block_size * n_embed * sizeof(float)));
     CHECK_CUDA(cudaMemset(d_db1, 0, n_hidden * sizeof(float)));
@@ -593,6 +611,79 @@ __host__ size_t calculateAndAllocateWorkspace(cudnnHandle_t cudnnHandle,
 }
 
 
+std::vector<int> inference(
+    cudnnHandle_t cudnnHandle,
+    float *d_embd, float *d_W1, float *d_b1, float *d_W2, float *d_b2,
+    cudnnTensorDescriptor_t x_desc, cudnnFilterDescriptor_t w1_desc,
+    cudnnConvolutionDescriptor_t conv_desc, cudnnTensorDescriptor_t y_desc,
+    cudnnTensorDescriptor_t b1_desc, cudnnActivationDescriptor_t activationDesc,
+    cudnnFilterDescriptor_t w2_desc, cudnnTensorDescriptor_t y2_desc,
+    cudnnTensorDescriptor_t b2_desc,
+    void *workSpace, size_t workspaceSize,
+    int *h_input, int input_length,
+    int num_predictions) {
+    const float alpha = 1.0f;
+    const float beta = 0.0f;
+
+    // Allocate device memory for input and output
+    int *d_input;
+    float *d_Xembd, *d_Y1, *d_Y2;
+    CHECK_CUDA(cudaMalloc(&d_input, input_length * sizeof(int)));
+    CHECK_CUDA(cudaMalloc(&d_Xembd, input_length * n_embed * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&d_Y1, n_hidden * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&d_Y2, vocab_size * sizeof(float)));
+
+    // Copy input to device
+    CHECK_CUDA(cudaMemcpy(d_input, h_input, input_length * sizeof(int), cudaMemcpyHostToDevice));
+
+    std::vector<int> predictions;
+
+    int* d_maxIndex;
+    cudaMalloc(&d_maxIndex, sizeof(int));
+
+    for (int i = 0; i < num_predictions; i++) {
+        // Embedding lookup
+        lookup_embeddings<<<(input_length + threadsPerBlock - 1) / threadsPerBlock, threadsPerBlock>>>(d_embd, d_input, d_Xembd, 1, input_length, n_embed);
+
+        // Forward pass
+        // Layer 1: Convolution + Bias + Activation
+        CHECK_CUDNN(cudnnConvolutionForward(cudnnHandle, &alpha, x_desc, d_Xembd, w1_desc, d_W1, conv_desc,
+                                            CUDNN_CONVOLUTION_FWD_ALGO_GEMM, workSpace, workspaceSize, &beta, y_desc, d_Y1));
+        CHECK_CUDNN(cudnnAddTensor(cudnnHandle, &alpha, b1_desc, d_b1, &alpha, y_desc, d_Y1));
+        CHECK_CUDNN(cudnnActivationForward(cudnnHandle, activationDesc, &alpha, y_desc, d_Y1, &beta, y_desc, d_Y1));
+
+        // Layer 2: Convolution + Bias + Softmax
+        CHECK_CUDNN(cudnnConvolutionForward(cudnnHandle, &alpha, y_desc, d_Y1, w2_desc, d_W2, conv_desc,
+                                            CUDNN_CONVOLUTION_FWD_ALGO_GEMM, workSpace, workspaceSize, &beta, y2_desc, d_Y2));
+        CHECK_CUDNN(cudnnAddTensor(cudnnHandle, &alpha, b2_desc, d_b2, &alpha, y2_desc, d_Y2));
+        CHECK_CUDNN(cudnnSoftmaxForward(cudnnHandle, CUDNN_SOFTMAX_ACCURATE, CUDNN_SOFTMAX_MODE_CHANNEL,
+                                        &alpha, y2_desc, d_Y2, &beta, y2_desc, d_Y2));
+
+        // Find the token with the highest probability
+        int predicted_index;
+        findMaxIndex<<<1, 256>>>(d_Y2, vocab_size, d_maxIndex);
+        CHECK_CUDA(cudaMemcpy(&predicted_index, d_maxIndex, sizeof(int), cudaMemcpyDeviceToHost));
+
+        predictions.push_back(predicted_index);
+
+        // Shift input and add the new prediction
+        for (int j = 0; j < input_length - 1; j++) {
+            h_input[j] = h_input[j + 1];
+        }
+        h_input[input_length - 1] = predicted_index;
+        CHECK_CUDA(cudaMemcpy(d_input, h_input, input_length * sizeof(int), cudaMemcpyHostToDevice));
+    }
+
+    // Free device memory
+    cudaFree(d_input);
+    cudaFree(d_Xembd);
+    cudaFree(d_Y1);
+    cudaFree(d_Y2);
+    cudaFree(d_maxIndex);
+
+    return predictions;
+}
+
 int main(int argc, char *argv[]) {
     printVersions();
     // testConvolution();
@@ -642,36 +733,18 @@ int main(int argc, char *argv[]) {
     // std::cout << "Validation set size: " << Xdev.size() << ", " << Ydev.size() << std::endl;
     // std::cout << "Test set size: " << Xte.size() << ", " << Yte.size() << std::endl;
 
-    // Copy Input data to GPU - Since data is small this simplifiies the training loop
-    for (int i = 0; i < 20; i++) {
-        for (int j = 0; j < block_size; j++) {
-            std::cout << itos.at(Xtr[i * block_size + j]) << ",";
-        }
-        std::cout << "--->" << itos.at(Ytr[i]) << std::endl;
-    }
-
+   
     int *d_Xtr;
     int *d_Ytr;
     
     std::cout << "Copying input data to GPU" << std::endl;
     CHECK_CUDA(cudaMalloc(&d_Xtr, Xtr_size * block_size * sizeof(int)));
     CHECK_CUDA(cudaMemcpy(d_Xtr, Xtr, Xtr_size * block_size * sizeof(int), cudaMemcpyHostToDevice));
-    
     CHECK_CUDA(cudaMalloc(&d_Ytr, Xtr_size * sizeof(int)));
     CHECK_CUDA(cudaMemcpy(d_Ytr, Ytr, Xtr_size * sizeof(int), cudaMemcpyHostToDevice));
 
-    // Read back
-    int tempX[20][block_size] = {0};
-    int tempY[block_size] = {0};
-    CHECK_CUDA(cudaMemcpy(tempX, d_Xtr, 20 * block_size * sizeof(int), cudaMemcpyDeviceToHost));
-    CHECK_CUDA(cudaMemcpy(tempY, d_Ytr, 20 * sizeof(int), cudaMemcpyDeviceToHost));
-    for (int i = 0; i < 20; i++) {
-        for (int j = 0; j < block_size; j++) {
-            std::cout << itos.at(tempX[i][j]) << ",";
-        }
-        std::cout << "--->" << itos.at(tempY[i]) << std::endl;
-    }
-
+    // checkDataCopyToGPU(Xtr, Xtr_size, Ytr, d_Xtr, d_Ytr, itos);
+    
     // Initialize cuDNN
     cudnnHandle_t cudnnHandle;
     CHECK_CUDNN(cudnnCreate(&cudnnHandle));
@@ -730,6 +803,7 @@ int main(int argc, char *argv[]) {
         // Generate Random Indices
         //std::cout << "Generating random indices for training data minibatch\n";
         generate_indices_kernel<<<(batch_size + threadsPerBlock - 1) / threadsPerBlock, threadsPerBlock>>>(d_idx, devStates, batch_size, Xtr_size);
+        //printRandomIndices(d_idx, itos);
 
         // Generate minibatch
         //std::cout << "Generating training data minibatch\n";
@@ -758,6 +832,22 @@ int main(int argc, char *argv[]) {
                                     workSpace, workspaceSize);
        
     }
+
+    // Run inference for a few use case
+    int h_input[block_size] = {0,0,0,0,0,0,0,0,0,19,9,14,3,12,1,9};  // Your input sequence
+    int num_predictions = 10;  // Number of tokens to predict
+
+    std::vector<int> predictions = inference(cudnnHandle,
+                                            d_embd, d_W1, d_b1, d_W2, d_b2,
+                                            x_desc, w1_desc, conv_desc, y_desc, b1_desc, activationDesc,
+                                            w2_desc, y2_desc, b2_desc,
+                                            workSpace, workspaceSize, h_input, block_size, num_predictions);
+
+    // Print predictions
+    for (int token : predictions) {
+        std::cout << itos.at(token) << " ";
+    }
+    std::cout << std::endl;
 
 
     // Clean up
@@ -803,7 +893,40 @@ int main(int argc, char *argv[]) {
 }
 
 
-// Debug function - Ignore - not relevant to the model.
+// Debug functions - Ignore - not relevant to the model.
+void printRandomIndices(int *d_idx, std::map<int, char>& itos) {
+    int tempIdx[batch_size] = {0};
+    CHECK_CUDA(cudaMemcpy(tempIdx, d_idx, batch_size * sizeof(int), cudaMemcpyDeviceToHost));
+    for (int i = 0; i < batch_size; i++) {
+        std::cout << tempIdx[i] << ", "; 
+    }
+    std::cout << std::endl;
+}
+
+
+void checkDataCopyToGPU(int *Xtr, int Xtr_size, int *Ytr, int *d_Xtr, int *d_Ytr, std::map<int, char>& itos){
+     // Copy Input data to GPU - Since data is small this simplifiies the training loop
+    for (int i = 0; i < 20; i++) {
+        for (int j = 0; j < block_size; j++) {
+            std::cout << itos.at(Xtr[i * block_size + j]);
+        }
+        std::cout << "--->" << itos.at(Ytr[i]) << std::endl;
+    }
+
+    // Read back
+    int tempX[20][block_size] = {0};
+    int tempY[block_size] = {0};
+    CHECK_CUDA(cudaMemcpy(tempX, d_Xtr, 20 * block_size * sizeof(int), cudaMemcpyDeviceToHost));
+    CHECK_CUDA(cudaMemcpy(tempY, d_Ytr, 20 * sizeof(int), cudaMemcpyDeviceToHost));
+    for (int i = 0; i < 20; i++) {
+        for (int j = 0; j < block_size; j++) {
+            std::cout << tempX[i][j] << ",";
+        }
+        std::cout << "--->" << itos.at(tempY[i]) << std::endl;
+    }
+}
+
+
 void testConvolution() {
     cudnnHandle_t cudnnHandle;
     CHECK_CUDNN(cudnnCreate(&cudnnHandle));
