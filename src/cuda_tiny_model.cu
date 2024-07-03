@@ -40,6 +40,8 @@ float learning_rate = 0.0001f;
 const int threadsPerBlock = 256;
 
 
+void testConvolution();
+
 #define CHECK_CUDA(call)                                                     \
     {                                                                        \
         const cudaError_t error = call;                                      \
@@ -287,6 +289,521 @@ void printVersions() {
               << (cudnnVersion % 100) / 10 << std::endl;
 }
 
+
+
+
+__host__ std::string parseCommandLineArguments(int argc, char *argv[])
+{
+    std::cout << "Parsing CLI arguments\n";
+    std::string inputFile = "data/names.txt";
+
+    for (int i = 1; i < argc; i++)
+    {
+        std::string option(argv[i]);
+        i++;
+        std::string value(argv[i]);
+        if (option.compare("-i") == 0)
+        {
+            inputFile = value;
+        }
+    }
+    std::cout << "input File Name: " << inputFile << "\n";
+    return {inputFile};
+}
+
+__host__ void initialize_model_and_data(int **d_idx, int **d_X, int **d_Y, 
+                                        float **d_Xembd, float **d_embd, 
+                                        float **d_W1, float **d_b1, float **d_W2, 
+                                        float **d_b2) {
+    // Set up Array to hold indices for minibatches of training data
+    CHECK_CUDA(cudaMalloc(d_idx, batch_size * sizeof(int)));
+    
+    // Set up input batch arrays
+    CHECK_CUDA(cudaMalloc(d_X, batch_size * block_size * sizeof(int)));
+    CHECK_CUDA(cudaMalloc(d_Y, batch_size * sizeof(int)));
+    
+    // Set up input batch size for embeddings
+    CHECK_CUDA(cudaMalloc(d_Xembd, batch_size * block_size * n_embed * sizeof(float)));
+    
+    // Initialize Model
+    // Embedding matrix
+    CHECK_CUDA(cudaMalloc(d_embd, vocab_size * n_embed * sizeof(float)));
+    initialize_random(*d_embd, vocab_size * n_embed, 1.0f, 0.0f);
+    
+    // Hidden layer weights and biases
+    CHECK_CUDA(cudaMalloc(d_W1, n_hidden * block_size * n_embed * sizeof(float)));
+    initialize_random(*d_W1, n_embed * block_size * n_hidden, (5.0f / 3.0f) / sqrtf(n_embed * block_size), 0.0f);
+    CHECK_CUDA(cudaMalloc(d_b1, n_hidden * sizeof(float)));
+    initialize_random(*d_b1, n_hidden, 0.01f, 0.0f);
+    
+    // Softmax layer weights and biases
+    CHECK_CUDA(cudaMalloc(d_W2, n_hidden * vocab_size * sizeof(float)));
+    initialize_random(*d_W2, n_hidden * vocab_size, 0.01f, 0.0f);
+    CHECK_CUDA(cudaMalloc(d_b2, vocab_size * sizeof(float)));
+    initialize_random(*d_b2, vocab_size, 0.0f, 0.0f);
+}
+
+__host__ void allocate_intermediate_buffers(
+    float **d_Y1, float **d_Y2, 
+    float **d_dW1, float **d_db1, float **d_dW2, float **d_db2, 
+    float **d_dY1, float **d_dY2, float **d_dEmbd) {
+    // Layer 1
+    CHECK_CUDA(cudaMalloc(d_Y1, n_hidden * batch_size * sizeof(float)));
+
+    // Layer 2
+    CHECK_CUDA(cudaMalloc(d_Y2, vocab_size * n_hidden * sizeof(float)));
+
+    // Gradients
+    CHECK_CUDA(cudaMalloc(d_dW1, n_hidden * block_size * n_embed * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(d_db1, n_hidden * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(d_dW2, vocab_size * n_hidden * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(d_db2, vocab_size * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(d_dY1, batch_size * n_hidden * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(d_dY2, batch_size * vocab_size * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(d_dEmbd, vocab_size * n_embed * sizeof(float)));
+}
+
+
+void initialize_cudnn_descriptors(
+    cudnnTensorDescriptor_t *x_desc, cudnnTensorDescriptor_t *y_desc, cudnnTensorDescriptor_t *b1_desc,
+    cudnnFilterDescriptor_t *w1_desc,
+    cudnnTensorDescriptor_t *y2_desc, cudnnTensorDescriptor_t *b2_desc,
+    cudnnFilterDescriptor_t *w2_desc,
+    cudnnTensorDescriptor_t *labels_desc,
+    cudnnConvolutionDescriptor_t *conv_desc,
+    cudnnActivationDescriptor_t *activationDesc) {
+    CHECK_CUDNN(cudnnCreateTensorDescriptor(x_desc));
+    CHECK_CUDNN(cudnnCreateTensorDescriptor(y_desc));
+    CHECK_CUDNN(cudnnCreateTensorDescriptor(b1_desc));
+    CHECK_CUDNN(cudnnCreateFilterDescriptor(w1_desc));
+
+    CHECK_CUDNN(cudnnCreateTensorDescriptor(y2_desc));
+    CHECK_CUDNN(cudnnCreateTensorDescriptor(b2_desc));
+    CHECK_CUDNN(cudnnCreateFilterDescriptor(w2_desc));
+    CHECK_CUDNN(cudnnCreateTensorDescriptor(labels_desc));
+    CHECK_CUDNN(cudnnSetTensor4dDescriptor(*labels_desc, CUDNN_TENSOR_NCHW, CUDNN_DATA_FLOAT, batch_size, vocab_size, 1, 1));
+
+    CHECK_CUDNN(cudnnSetTensor4dDescriptor(*x_desc, CUDNN_TENSOR_NCHW, CUDNN_DATA_FLOAT, batch_size, block_size * n_embed, 1, 1));
+    CHECK_CUDNN(cudnnSetTensor4dDescriptor(*y_desc, CUDNN_TENSOR_NCHW, CUDNN_DATA_FLOAT, batch_size, n_hidden, 1, 1));
+    CHECK_CUDNN(cudnnSetTensor4dDescriptor(*b1_desc, CUDNN_TENSOR_NCHW, CUDNN_DATA_FLOAT, 1, n_hidden, 1, 1));
+    CHECK_CUDNN(cudnnSetFilter4dDescriptor(*w1_desc, CUDNN_DATA_FLOAT, CUDNN_TENSOR_NCHW, n_hidden, block_size * n_embed, 1, 1));
+    CHECK_CUDNN(cudnnSetTensor4dDescriptor(*b2_desc, CUDNN_TENSOR_NCHW, CUDNN_DATA_FLOAT, 1, vocab_size, 1, 1));
+    CHECK_CUDNN(cudnnSetFilter4dDescriptor(*w2_desc, CUDNN_DATA_FLOAT, CUDNN_TENSOR_NCHW, vocab_size, n_hidden, 1, 1));
+    CHECK_CUDNN(cudnnSetTensor4dDescriptor(*y2_desc, CUDNN_TENSOR_NCHW, CUDNN_DATA_FLOAT, batch_size, vocab_size, 1, 1));
+
+    CHECK_CUDNN(cudnnCreateConvolutionDescriptor(conv_desc));
+    CHECK_CUDNN(cudnnSetConvolution2dDescriptor(*conv_desc, 0, 0, 1, 1, 1, 1, CUDNN_CROSS_CORRELATION, CUDNN_DATA_FLOAT));
+
+    // Create activation descriptor
+    CHECK_CUDNN(cudnnCreateActivationDescriptor(activationDesc));
+    CHECK_CUDNN(cudnnSetActivationDescriptor(*activationDesc, CUDNN_ACTIVATION_TANH, CUDNN_PROPAGATE_NAN, 0.0));
+}
+
+
+void forward_pass(cudnnHandle_t cudnnHandle,
+                float *d_Xembd, float *d_W1, float *d_b1, float *d_W2, float *d_b2,
+                float *d_Y1, float *d_Y2,
+                cudnnTensorDescriptor_t x_desc, cudnnFilterDescriptor_t w1_desc,
+                cudnnConvolutionDescriptor_t conv_desc, cudnnTensorDescriptor_t y_desc,
+                cudnnTensorDescriptor_t b1_desc, cudnnActivationDescriptor_t activationDesc,
+                cudnnFilterDescriptor_t w2_desc, cudnnTensorDescriptor_t y2_desc,
+                cudnnTensorDescriptor_t b2_desc,
+                void *workSpace, size_t workspaceSize) {
+    const float alpha = 1.0f;
+    const float beta = 0.0f;
+
+    // Layer 1: Convolution
+    CHECK_CUDNN(cudnnConvolutionForward(cudnnHandle, &alpha, x_desc, d_Xembd, w1_desc, d_W1, conv_desc,
+                                        CUDNN_CONVOLUTION_FWD_ALGO_GEMM, workSpace, workspaceSize, &beta, y_desc, d_Y1));
+    
+    // Add bias
+    CHECK_CUDNN(cudnnAddTensor(cudnnHandle, &alpha, b1_desc, d_b1, &alpha, y_desc, d_Y1));
+
+    // Apply tanh activation
+    CHECK_CUDNN(cudnnActivationForward(cudnnHandle, activationDesc, &alpha, y_desc, d_Y1, &beta, y_desc, d_Y1));
+
+    // Layer 2: Convolution (equivalent to matrix multiplication Y1 * W2)
+    CHECK_CUDNN(cudnnConvolutionForward(cudnnHandle, &alpha, y_desc, d_Y1, w2_desc, d_W2, conv_desc,
+                                        CUDNN_CONVOLUTION_FWD_ALGO_GEMM, workSpace, workspaceSize, &beta, y2_desc, d_Y2));
+    
+    // Add bias
+    CHECK_CUDNN(cudnnAddTensor(cudnnHandle, &alpha, b2_desc, d_b2, &alpha, y2_desc, d_Y2));
+
+    // Apply softmax
+    CHECK_CUDNN(cudnnSoftmaxForward(cudnnHandle, CUDNN_SOFTMAX_ACCURATE, CUDNN_SOFTMAX_MODE_CHANNEL,
+                                    &alpha, y2_desc, d_Y2, &beta, y2_desc, d_Y2));
+}
+
+__host__ float compute_cross_entropy_loss(float *d_Y2, int *d_Y, float *d_loss) {
+    float h_loss = 0;  // Host variable to store the final loss
+
+    // Launch the kernel
+    dim3 block(1);
+    dim3 grid(1);
+    crossEntropyLossKernel<<<grid, block>>>(d_Y2, d_Y, batch_size, vocab_size, d_loss);
+    CHECK_CUDA(cudaGetLastError());
+
+    // Copy the loss from device to host
+    CHECK_CUDA(cudaMemcpy(&h_loss, d_loss, sizeof(float), cudaMemcpyDeviceToHost));
+
+    // Print the loss
+    std::cout << "Cross-Entropy Loss: " << h_loss << std::endl;
+
+    return h_loss;
+}
+
+__host__ void backpropagation_and_update(
+                cudnnHandle_t cudnnHandle,
+                float *d_Y2, float *d_dY2, float *d_Y1, float *d_dY1, float *d_Xembd, int *d_X, int *d_Y,
+                float *d_W1, float *d_b1, float *d_W2, float *d_b2, float *d_embd,
+                float *d_dW1, float *d_db1, float *d_dW2, float *d_db2, float *d_dEmbd,
+                cudnnTensorDescriptor_t y2_desc, cudnnTensorDescriptor_t y_desc, cudnnTensorDescriptor_t x_desc,
+                cudnnFilterDescriptor_t w2_desc, cudnnFilterDescriptor_t w1_desc,
+                cudnnTensorDescriptor_t b2_desc, cudnnTensorDescriptor_t b1_desc,
+                cudnnConvolutionDescriptor_t conv_desc,
+                cudnnActivationDescriptor_t activationDesc,
+                void *workSpace, size_t workspaceSize) {
+
+    const float alpha = 1.0f;
+    const float beta = 0.0f;
+    int threadsPerBlock = 256;  // Adjust as needed
+
+    // 1. Compute gradients for output layer
+    CHECK_CUDNN(cudnnSoftmaxBackward(cudnnHandle, CUDNN_SOFTMAX_ACCURATE, CUDNN_SOFTMAX_MODE_CHANNEL,
+                                    &alpha, y2_desc, d_Y2, y2_desc, d_Y2, &beta, y2_desc, d_dY2));
+
+    // Adjust d_dY2 based on true labels
+    adjustGradientsKernel<<<(batch_size + threadsPerBlock - 1) / threadsPerBlock, threadsPerBlock>>>(d_dY2, d_Y, batch_size, vocab_size);
+
+    // 2. Compute gradients for W2 and b2
+    CHECK_CUDNN(cudnnConvolutionBackwardFilter(cudnnHandle, &alpha, y_desc, d_Y1, y2_desc, d_dY2, conv_desc,
+                                            CUDNN_CONVOLUTION_BWD_FILTER_ALGO_0, workSpace, workspaceSize,
+                                            &beta, w2_desc, d_dW2));
+
+    CHECK_CUDNN(cudnnConvolutionBackwardBias(cudnnHandle, &alpha, y2_desc, d_dY2, &beta, b2_desc, d_db2));
+
+    // 3. Compute gradients for hidden layer
+    CHECK_CUDNN(cudnnConvolutionBackwardData(cudnnHandle, &alpha, w2_desc, d_W2, y2_desc, d_dY2, conv_desc,
+                                            CUDNN_CONVOLUTION_BWD_DATA_ALGO_0, workSpace, workspaceSize,
+                                            &beta, y_desc, d_dY1));
+
+    CHECK_CUDNN(cudnnActivationBackward(cudnnHandle, activationDesc, &alpha, y_desc, d_Y1, y_desc, d_dY1,
+                                        y_desc, d_Y1, &beta, y_desc, d_dY1));
+
+    // 4. Compute gradients for W1 and b1
+    CHECK_CUDNN(cudnnConvolutionBackwardFilter(cudnnHandle, &alpha, x_desc, d_Xembd, y_desc, d_dY1, conv_desc,
+                                            CUDNN_CONVOLUTION_BWD_FILTER_ALGO_0, workSpace, workspaceSize,
+                                            &beta, w1_desc, d_dW1));
+
+    CHECK_CUDNN(cudnnConvolutionBackwardBias(cudnnHandle, &alpha, y_desc, d_dY1, &beta, b1_desc, d_db1));
+
+    // 5. Compute gradients for embeddings
+    CHECK_CUDNN(cudnnConvolutionBackwardData(cudnnHandle, &alpha, w1_desc, d_W1, y_desc, d_dY1, conv_desc,
+                                            CUDNN_CONVOLUTION_BWD_DATA_ALGO_0, workSpace, workspaceSize,
+                                            &beta, x_desc, d_Xembd));
+
+    computeEmbeddingGradients<<<(batch_size * block_size + threadsPerBlock - 1) / threadsPerBlock, threadsPerBlock>>>(d_Xembd, d_X, d_dEmbd, 
+                                                                batch_size, block_size, n_embed, vocab_size);
+
+    // 6. Update weights and biases
+    updateParametersKernel<<<(vocab_size * n_hidden + (threadsPerBlock - 1)) / threadsPerBlock, threadsPerBlock>>>(d_W2, d_dW2, learning_rate, vocab_size * n_hidden);
+    updateParametersKernel<<<(vocab_size + threadsPerBlock - 1) / threadsPerBlock, threadsPerBlock>>>(d_b2, d_db2, learning_rate, vocab_size);
+    updateParametersKernel<<<(n_hidden * block_size * n_embed + (threadsPerBlock - 1)) / threadsPerBlock, threadsPerBlock>>>(d_W1, d_dW1, learning_rate, n_hidden * block_size * n_embed);
+    updateParametersKernel<<<(n_hidden + threadsPerBlock - 1) / threadsPerBlock, threadsPerBlock>>>(d_b1, d_db1, learning_rate, n_hidden);
+    updateParametersKernel<<<(vocab_size * n_embed + threadsPerBlock - 1) / threadsPerBlock, threadsPerBlock>>>(d_embd, d_dEmbd, learning_rate, vocab_size * n_embed);
+
+    // Zero out the gradients
+    CHECK_CUDA(cudaMemset(d_dEmbd, 0, vocab_size * n_embed * sizeof(float)));
+    CHECK_CUDA(cudaMemset(d_dW1, 0, n_hidden * block_size * n_embed * sizeof(float)));
+    CHECK_CUDA(cudaMemset(d_db1, 0, n_hidden * sizeof(float)));
+    CHECK_CUDA(cudaMemset(d_dW2, 0, vocab_size * n_hidden * sizeof(float)));
+    CHECK_CUDA(cudaMemset(d_db2, 0, vocab_size * sizeof(float)));
+    CHECK_CUDA(cudaMemset(d_dY1, 0, batch_size * n_hidden * sizeof(float)));
+    CHECK_CUDA(cudaMemset(d_dY2, 0, batch_size * vocab_size * sizeof(float)));
+}
+
+__host__ size_t calculateAndAllocateWorkspace(cudnnHandle_t cudnnHandle,
+                                              cudnnTensorDescriptor_t x_desc,
+                                              cudnnFilterDescriptor_t w1_desc,
+                                              cudnnFilterDescriptor_t w2_desc,
+                                              cudnnTensorDescriptor_t y_desc,
+                                              cudnnTensorDescriptor_t y2_desc,
+                                              cudnnConvolutionDescriptor_t conv_desc,
+                                              void **workSpace) {
+    size_t workspaceSize = 0;
+    size_t temp_workspaceSize = 0;
+    cudnnConvolutionFwdAlgo_t fwdAlgo = CUDNN_CONVOLUTION_FWD_ALGO_GEMM;
+    cudnnConvolutionBwdFilterAlgo_t bwdFilterAlgo = CUDNN_CONVOLUTION_BWD_FILTER_ALGO_0;
+    cudnnConvolutionBwdDataAlgo_t bwdDataAlgo = CUDNN_CONVOLUTION_BWD_DATA_ALGO_0;
+
+    // Lambda to update workspace size
+    auto updateWorkspaceSize = [&](size_t size) {
+        workspaceSize = std::max(workspaceSize, size);
+    };
+
+    // Calculate workspace size for forward pass
+    CHECK_CUDNN(cudnnGetConvolutionForwardWorkspaceSize(cudnnHandle,
+                                                x_desc,
+                                                w1_desc,
+                                                conv_desc,
+                                                y_desc,
+                                                fwdAlgo,
+                                                &temp_workspaceSize));
+    updateWorkspaceSize(temp_workspaceSize);
+
+    // Calculate workspace size for backward filter (W2)
+    CHECK_CUDNN(cudnnGetConvolutionBackwardFilterWorkspaceSize(cudnnHandle,
+                                                            y_desc,
+                                                            y2_desc,
+                                                            conv_desc,
+                                                            w2_desc,
+                                                            bwdFilterAlgo,
+                                                            &temp_workspaceSize));
+    updateWorkspaceSize(temp_workspaceSize);
+
+    // Calculate workspace size for backward data (hidden layer)
+    CHECK_CUDNN(cudnnGetConvolutionBackwardDataWorkspaceSize(cudnnHandle,
+                                                            w2_desc,
+                                                            y2_desc,
+                                                            conv_desc,
+                                                            y_desc,
+                                                            bwdDataAlgo,
+                                                            &temp_workspaceSize));
+    updateWorkspaceSize(temp_workspaceSize);
+
+    // Calculate workspace size for backward filter (W1)
+    CHECK_CUDNN(cudnnGetConvolutionBackwardFilterWorkspaceSize(cudnnHandle,
+                                                            x_desc,
+                                                            y_desc,
+                                                            conv_desc,
+                                                            w1_desc,
+                                                            bwdFilterAlgo,
+                                                            &temp_workspaceSize));
+    updateWorkspaceSize(temp_workspaceSize);
+
+    // Allocate workspace with the maximum size required
+    if (workspaceSize > 0) {
+        if (*workSpace) cudaFree(*workSpace);
+        CHECK_CUDA(cudaMalloc(workSpace, workspaceSize));
+    }
+
+    std::cout << "Allocated workspace size: " << workspaceSize << " bytes" << std::endl;
+
+    return workspaceSize;
+}
+
+
+int main(int argc, char *argv[]) {
+    printVersions();
+    // testConvolution();
+
+    /**
+    * Part 1: Prepare the training data. Extract the text from input file,
+    * creat vocabulary (which is set of unique characters, also known as tokens) 
+    * out of the text, 
+    * Assign indexes to the vocabulary (tokens). 
+    */
+    std::string filename = parseCommandLineArguments(argc, argv);
+
+    // Read and split lines from the file
+    std::vector<std::string> words = readAndSplitLines(filename);
+    std::cout << "Input Data size " << words.size() << std::endl;
+
+    // Unique sorted characters and mappings
+    std::set<char> charSet;
+    for (const auto& w : words) {
+        charSet.insert(w.begin(), w.end());
+    }
+
+    std::vector<char> chars(charSet.begin(), charSet.end());
+    std::map<char, int> stoi;
+    std::map<int, char> itos;
+    createMappings(chars, stoi, itos);
+    vocab_size = itos.size();
+    std::cout << "Vocab Size is " << vocab_size << std::endl;
+
+
+    // Shuffle words
+    std::random_device rd;
+    std::mt19937 g(rd());
+    std::shuffle(words.begin(), words.end(), g);
+
+    // Split the data
+    size_t n1 = static_cast<size_t>(0.8 * words.size());
+    size_t n2 = static_cast<size_t>(0.9 * words.size());
+    std::cout << n1 << ", " << n2 << std::endl;
+
+    auto [Xtr, Ytr, Xtr_size] = buildDataset({words.begin(), words.begin() + n1}, stoi);
+    // auto [Xdev, Ydev] = buildDataset({words.begin() + n1, words.begin() + n2}, stoi);
+    // auto [Xte, Yte] = buildDataset({words.begin() + n2, words.end()}, stoi);
+
+    // Output for verification
+    // std::cout << "Training set size: " << Xtr.size() << ", " << Ytr.size() << std::endl;
+    // std::cout << "Validation set size: " << Xdev.size() << ", " << Ydev.size() << std::endl;
+    // std::cout << "Test set size: " << Xte.size() << ", " << Yte.size() << std::endl;
+
+    // Copy Input data to GPU - Since data is small this simplifiies the training loop
+    for (int i = 0; i < 20; i++) {
+        for (int j = 0; j < block_size; j++) {
+            std::cout << itos.at(Xtr[i * block_size + j]) << ",";
+        }
+        std::cout << "--->" << itos.at(Ytr[i]) << std::endl;
+    }
+
+    int *d_Xtr;
+    int *d_Ytr;
+    
+    std::cout << "Copying input data to GPU" << std::endl;
+    CHECK_CUDA(cudaMalloc(&d_Xtr, Xtr_size * block_size * sizeof(int)));
+    CHECK_CUDA(cudaMemcpy(d_Xtr, Xtr, Xtr_size * block_size * sizeof(int), cudaMemcpyHostToDevice));
+    
+    CHECK_CUDA(cudaMalloc(&d_Ytr, Xtr_size * sizeof(int)));
+    CHECK_CUDA(cudaMemcpy(d_Ytr, Ytr, Xtr_size * sizeof(int), cudaMemcpyHostToDevice));
+
+    // Read back
+    int tempX[20][block_size] = {0};
+    int tempY[block_size] = {0};
+    CHECK_CUDA(cudaMemcpy(tempX, d_Xtr, 20 * block_size * sizeof(int), cudaMemcpyDeviceToHost));
+    CHECK_CUDA(cudaMemcpy(tempY, d_Ytr, 20 * sizeof(int), cudaMemcpyDeviceToHost));
+    for (int i = 0; i < 20; i++) {
+        for (int j = 0; j < block_size; j++) {
+            std::cout << itos.at(tempX[i][j]) << ",";
+        }
+        std::cout << "--->" << itos.at(tempY[i]) << std::endl;
+    }
+
+    // Initialize cuDNN
+    cudnnHandle_t cudnnHandle;
+    CHECK_CUDNN(cudnnCreate(&cudnnHandle));
+
+    /**
+    * Part 2: Allocate all the required variables, host and device
+    * memory, tensor and operation descriptors.
+    */
+    // Set up Array to hold indices for minibatches of training data
+    int *d_idx, *d_X, *d_Y;
+    float *d_Xembd, *d_embd, *d_W1, *d_b1, *d_W2, *d_b2;
+    
+    initialize_model_and_data(&d_idx, &d_X, &d_Y, &d_Xembd, &d_embd, 
+                            &d_W1, &d_b1, &d_W2, &d_b2);
+    
+    // Intermediate results
+    // Y1 = tanh(Xembed @ W1 + B1)
+    float *d_Y1, *d_Y2, *d_dW1, *d_db1, *d_dW2, *d_db2, *d_dY1, *d_dY2, *d_dEmbd;
+    allocate_intermediate_buffers(&d_Y1, &d_Y2, &d_dW1, &d_db1, &d_dW2, &d_db2, 
+                                  &d_dY1, &d_dY2, &d_dEmbd);
+    
+
+    // Create tensor descriptors
+    cudnnTensorDescriptor_t x_desc, y_desc, b1_desc;
+    cudnnFilterDescriptor_t w1_desc;
+    cudnnTensorDescriptor_t y2_desc, b2_desc;
+    cudnnFilterDescriptor_t w2_desc;
+    cudnnTensorDescriptor_t labels_desc;
+    cudnnConvolutionDescriptor_t conv_desc;
+    cudnnActivationDescriptor_t activationDesc;
+    initialize_cudnn_descriptors(&x_desc, &y_desc, &b1_desc, &w1_desc,
+                                &y2_desc, &b2_desc, &w2_desc,
+                                &labels_desc, &conv_desc, &activationDesc);
+
+    // cross entropy loss
+    float *d_loss;
+    CHECK_CUDA(cudaMalloc(&d_loss, sizeof(float)));
+
+    // Allocate workspace
+    void *workSpace = nullptr;
+    size_t workspaceSize = calculateAndAllocateWorkspace(cudnnHandle,
+                           x_desc, w1_desc, w2_desc, y_desc, y2_desc, conv_desc,
+                           &workSpace);
+
+    // Random indices generataion setup
+    curandState *devStates;
+    cudaMalloc((void **)&devStates, batch_size * sizeof(curandState));
+    setup_kernel<<<(batch_size + threadsPerBlock - 1) / threadsPerBlock, threadsPerBlock>>>(devStates, 2147483647);
+    
+    /**
+    * Part 3: Run the training loop for the neural network.
+    */
+    // Training loop
+    for (int i = 0; i < max_steps; ++i) {
+
+        // Generate Random Indices
+        //std::cout << "Generating random indices for training data minibatch\n";
+        generate_indices_kernel<<<(batch_size + threadsPerBlock - 1) / threadsPerBlock, threadsPerBlock>>>(d_idx, devStates, batch_size, Xtr_size);
+
+        // Generate minibatch
+        //std::cout << "Generating training data minibatch\n";
+        generate_training_minibatch<<<(batch_size + threadsPerBlock - 1) / threadsPerBlock, threadsPerBlock>>>(d_X, d_Y, d_Xtr, d_Ytr, d_idx, batch_size, block_size);
+        lookup_embeddings<<<(batch_size + threadsPerBlock - 1) / threadsPerBlock, threadsPerBlock>>>(d_embd, d_X, d_Xembd, batch_size, block_size, n_embed);
+   
+        
+        // Forward pass
+        forward_pass(cudnnHandle, d_Xembd, d_W1, d_b1, d_W2, d_b2,
+                     d_Y1, d_Y2, x_desc, w1_desc, conv_desc, y_desc,
+                     b1_desc, activationDesc, w2_desc, y2_desc, b2_desc,
+                    workSpace, workspaceSize);
+
+        compute_cross_entropy_loss(d_Y2, d_Y, d_loss);
+
+        // Backpropgation
+        backpropagation_and_update(cudnnHandle,
+                                    d_Y2, d_dY2, d_Y1, d_dY1, d_Xembd, d_X, d_Y,
+                                    d_W1, d_b1, d_W2, d_b2, d_embd,
+                                    d_dW1, d_db1, d_dW2, d_db2, d_dEmbd,
+                                    y2_desc, y_desc, x_desc,
+                                    w2_desc, w1_desc,
+                                    b2_desc, b1_desc,
+                                    conv_desc,
+                                    activationDesc,
+                                    workSpace, workspaceSize);
+       
+    }
+
+
+    // Clean up
+
+    CHECK_CUDNN(cudnnDestroyTensorDescriptor(x_desc));
+    CHECK_CUDNN(cudnnDestroyTensorDescriptor(y_desc));
+    CHECK_CUDNN(cudnnDestroyTensorDescriptor(b1_desc));
+    CHECK_CUDNN(cudnnDestroyFilterDescriptor(w1_desc));
+    CHECK_CUDNN(cudnnDestroyConvolutionDescriptor(conv_desc));
+    CHECK_CUDNN(cudnnDestroyActivationDescriptor(activationDesc));
+    
+    CHECK_CUDNN(cudnnDestroyTensorDescriptor(y2_desc));
+    CHECK_CUDNN(cudnnDestroyTensorDescriptor(b2_desc));
+    CHECK_CUDNN(cudnnDestroyFilterDescriptor(w2_desc));
+
+    free(Xtr);
+    free(Ytr);
+
+    cudaFree(d_dEmbd);
+    cudaFree(d_loss);
+    cudaFree(devStates);
+    cudaFree(d_Y1);
+    cudaFree(d_Y2);
+    cudaFree(d_X);
+    cudaFree(d_Y);
+    cudaFree(d_Xembd);
+    cudaFree(d_idx);
+    cudaFree(d_Xtr);
+    cudaFree(d_Ytr);
+    cudaFree(d_embd);
+    cudaFree(d_W1);
+    cudaFree(d_b1);
+    cudaFree(d_W2);
+    cudaFree(d_b2);
+    cudaFree(d_dW1);
+    cudaFree(d_db1);
+    cudaFree(d_dW2);
+    cudaFree(d_db2);
+    cudaFree(d_dY1);
+    cudaFree(d_dY2);
+    cudnnDestroy(cudnnHandle);
+    return 0;
+}
+
+
+// Debug function - Ignore - not relevant to the model.
 void testConvolution() {
     cudnnHandle_t cudnnHandle;
     CHECK_CUDNN(cudnnCreate(&cudnnHandle));
@@ -354,426 +871,4 @@ void testConvolution() {
     cudaFree(d_Y);
     if (workSpace) cudaFree(workSpace);
     cudnnDestroy(cudnnHandle);
-}
-
-
-__host__ std::string parseCommandLineArguments(int argc, char *argv[])
-{
-    std::cout << "Parsing CLI arguments\n";
-    std::string inputFile = "data/names.txt";
-
-    for (int i = 1; i < argc; i++)
-    {
-        std::string option(argv[i]);
-        i++;
-        std::string value(argv[i]);
-        if (option.compare("-i") == 0)
-        {
-            inputFile = value;
-        }
-    }
-    std::cout << "input File Name: " << inputFile << "\n";
-    return {inputFile};
-}
-
-int main(int argc, char *argv[]) {
-    printVersions();
-    // testConvolution();
-
-    /**
-    * Part 1: Prepare the training data. Extract the text from input file,
-    * creat vocabulary (which is set of unique characters, also known as tokens) 
-    * out of the text, 
-    * Assign indexes to the vocabulary (tokens). 
-    */
-    std::string filename = parseCommandLineArguments(argc, argv);
-
-    // Read and split lines from the file
-    std::vector<std::string> words = readAndSplitLines(filename);
-    std::cout << "Input Data size " << words.size() << std::endl;
-
-    // Unique sorted characters and mappings
-    std::set<char> charSet;
-    for (const auto& w : words) {
-        charSet.insert(w.begin(), w.end());
-    }
-
-    std::vector<char> chars(charSet.begin(), charSet.end());
-    std::map<char, int> stoi;
-    std::map<int, char> itos;
-    createMappings(chars, stoi, itos);
-    vocab_size = itos.size();
-    std::cout << "Vocab Size is " << vocab_size << std::endl;
-
-
-    // Shuffle words
-    std::random_device rd;
-    std::mt19937 g(rd());
-    std::shuffle(words.begin(), words.end(), g);
-
-    // Split the data
-    size_t n1 = static_cast<size_t>(0.8 * words.size());
-    size_t n2 = static_cast<size_t>(0.9 * words.size());
-    std::cout << n1 << ", " << n2 << std::endl;
-
-    auto [Xtr, Ytr, Xtr_size] = buildDataset({words.begin(), words.begin() + n1}, stoi);
-    // auto [Xdev, Ydev] = buildDataset({words.begin() + n1, words.begin() + n2}, stoi);
-    // auto [Xte, Yte] = buildDataset({words.begin() + n2, words.end()}, stoi);
-
-    // Output for verification
-    // std::cout << "Training set size: " << Xtr.size() << ", " << Ytr.size() << std::endl;
-    // std::cout << "Validation set size: " << Xdev.size() << ", " << Ydev.size() << std::endl;
-    // std::cout << "Test set size: " << Xte.size() << ", " << Yte.size() << std::endl;
-
-    // Copy Input data to GPU - Since data is small this simplifiies the training loop
-    for (int i = 0; i < 20; i++) {
-        for (int j = 0; j < block_size; j++) {
-            std::cout << itos.at(Xtr[i * block_size + j]) << ",";
-        }
-        std::cout << "--->" << itos.at(Ytr[i]) << std::endl;
-    }
-    int *d_Xtr;
-    int *d_Ytr;
-    
-    std::cout << "Copying input data to GPU" << std::endl;
-    CHECK_CUDA(cudaMalloc(&d_Xtr, Xtr_size * block_size * sizeof(int)));
-    CHECK_CUDA(cudaMemcpy(d_Xtr, Xtr, Xtr_size * block_size * sizeof(int), cudaMemcpyHostToDevice));
-    
-    CHECK_CUDA(cudaMalloc(&d_Ytr, Xtr_size * sizeof(int)));
-    CHECK_CUDA(cudaMemcpy(d_Ytr, Ytr, Xtr_size * sizeof(int), cudaMemcpyHostToDevice));
-
-    // Read back
-    int tempX[20][block_size] = {0};
-    int tempY[block_size] = {0};
-    CHECK_CUDA(cudaMemcpy(tempX, d_Xtr, 20 * block_size * sizeof(int), cudaMemcpyDeviceToHost));
-    CHECK_CUDA(cudaMemcpy(tempY, d_Ytr, 20 * sizeof(int), cudaMemcpyDeviceToHost));
-    for (int i = 0; i < 20; i++) {
-        for (int j = 0; j < block_size; j++) {
-            std::cout << itos.at(tempX[i][j]) << ",";
-        }
-        std::cout << "--->" << itos.at(tempY[i]) << std::endl;
-    }
-
-
-    /**
-    * Part 2: Allocate all the required variables, host and device
-    * memory, tensor and operation descriptors.
-    */
-    // Set up Array to hold indices for minibatches of training data
-    int *d_idx;
-    CHECK_CUDA(cudaMalloc(&d_idx, batch_size * sizeof(int)));
-
-    // Set up input batch arrays
-    int *d_X;
-    int *d_Y;
-    CHECK_CUDA(cudaMalloc(&d_X, batch_size * block_size * sizeof(int)));
-    CHECK_CUDA(cudaMalloc(&d_Y, batch_size * sizeof(int)));
-
-    // Set up input batch size for embeddings 
-    float *d_Xembd;
-    CHECK_CUDA(cudaMalloc(&d_Xembd, batch_size * block_size * n_embed * sizeof(float)));
-
-    // Initialize cuDNN
-    cudnnHandle_t cudnnHandle;
-    CHECK_CUDNN(cudnnCreate(&cudnnHandle));
-
-    // Initialize Model 
-    // Embedding matrix
-    float *d_embd;
-    CHECK_CUDA(cudaMalloc(&d_embd, vocab_size * n_embed * sizeof(float)));
-    initialize_random(d_embd, vocab_size * n_embed, 1.0f, 0.0f);
-
-    // Hidden layer weights and biases
-    float *d_W1, *d_b1;
-    CHECK_CUDA(cudaMalloc(&d_W1, n_hidden * block_size * n_embed * sizeof(float)));
-    initialize_random(d_W1, n_embed * block_size * n_hidden, (5.0f / 3.0f) / sqrtf(n_embed * block_size), 0.0f);
-    CHECK_CUDA(cudaMalloc(&d_b1, n_hidden * sizeof(float)));
-    initialize_random(d_b1, n_hidden, 0.01f, 0.0f);
-
-    // Softmax layer weights and biases
-    float *d_W2, *d_b2;
-    CHECK_CUDA(cudaMalloc(&d_W2, n_hidden * vocab_size * sizeof(float)));
-    initialize_random(d_W2, n_hidden * vocab_size, 0.01f, 0.0f);
-    CHECK_CUDA(cudaMalloc(&d_b2, vocab_size * sizeof(float)));
-    initialize_random(d_b2, vocab_size, 0.0f, 0.0f);
-
-    // Intermediate results
-    // Y1 = tanh(Xembed @ W1 + B1)
-    float *d_Y1;
-    CHECK_CUDA(cudaMalloc(&d_Y1, n_hidden * batch_size * sizeof(float)));
-
-    // Layer 2
-    float *d_Y2;
-    CHECK_CUDA(cudaMalloc(&d_Y2, vocab_size * n_hidden * sizeof(float)));
-    
-
-    // Gradiensts
-    float *d_dW1, *d_db1, *d_dW2, *d_db2, *d_dY1, *d_dY2, *d_dEmbd;
-
-    CHECK_CUDA(cudaMalloc(&d_dW1, n_hidden * block_size * n_embed * sizeof(float)));
-    CHECK_CUDA(cudaMalloc(&d_db1, n_hidden * sizeof(float)));
-    CHECK_CUDA(cudaMalloc(&d_dW2, vocab_size * n_hidden * sizeof(float)));
-    CHECK_CUDA(cudaMalloc(&d_db2, vocab_size * sizeof(float)));
-    CHECK_CUDA(cudaMalloc(&d_dY1, batch_size * n_hidden * sizeof(float)));
-    CHECK_CUDA(cudaMalloc(&d_dY2, batch_size * vocab_size * sizeof(float)));
-    CHECK_CUDA(cudaMalloc(&d_dEmbd, vocab_size * n_embed * sizeof(float)));
-    
-
-    // Create tensor descriptors
-    cudnnTensorDescriptor_t x_desc, y_desc, b1_desc;
-    cudnnFilterDescriptor_t w1_desc;
-    CHECK_CUDNN(cudnnCreateTensorDescriptor(&x_desc));
-    CHECK_CUDNN(cudnnCreateTensorDescriptor(&y_desc));
-    CHECK_CUDNN(cudnnCreateTensorDescriptor(&b1_desc));
-    CHECK_CUDNN(cudnnCreateFilterDescriptor(&w1_desc));
-
-    cudnnTensorDescriptor_t y2_desc, b2_desc;
-    cudnnFilterDescriptor_t w2_desc;
-    CHECK_CUDNN(cudnnCreateTensorDescriptor(&y2_desc));
-    CHECK_CUDNN(cudnnCreateTensorDescriptor(&b2_desc));
-    CHECK_CUDNN(cudnnCreateFilterDescriptor(&w2_desc));
-
-    cudnnTensorDescriptor_t labels_desc;
-    CHECK_CUDNN(cudnnCreateTensorDescriptor(&labels_desc));
-    CHECK_CUDNN(cudnnSetTensor4dDescriptor(labels_desc, CUDNN_TENSOR_NCHW, CUDNN_DATA_FLOAT, batch_size, vocab_size, 1, 1));
-
-    CHECK_CUDNN(cudnnSetTensor4dDescriptor(x_desc, CUDNN_TENSOR_NCHW, CUDNN_DATA_FLOAT, batch_size, block_size * n_embed, 1, 1));
-    CHECK_CUDNN(cudnnSetTensor4dDescriptor(y_desc, CUDNN_TENSOR_NCHW, CUDNN_DATA_FLOAT, batch_size, n_hidden, 1, 1));
-    CHECK_CUDNN(cudnnSetTensor4dDescriptor(b1_desc, CUDNN_TENSOR_NCHW, CUDNN_DATA_FLOAT, 1, n_hidden, 1, 1));
-    CHECK_CUDNN(cudnnSetFilter4dDescriptor(w1_desc, CUDNN_DATA_FLOAT, CUDNN_TENSOR_NCHW, n_hidden, block_size * n_embed,  1, 1));
-    CHECK_CUDNN(cudnnSetTensor4dDescriptor(b2_desc, CUDNN_TENSOR_NCHW, CUDNN_DATA_FLOAT, 1, vocab_size, 1, 1));
-    CHECK_CUDNN(cudnnSetFilter4dDescriptor(w2_desc, CUDNN_DATA_FLOAT, CUDNN_TENSOR_NCHW, vocab_size, n_hidden,  1, 1));
-    CHECK_CUDNN(cudnnSetTensor4dDescriptor(y2_desc, CUDNN_TENSOR_NCHW, CUDNN_DATA_FLOAT, batch_size, vocab_size, 1, 1));
-
-    float alpha = 1.0f, beta = 0.0f;
-    cudnnConvolutionDescriptor_t conv_desc;
-    CHECK_CUDNN(cudnnCreateConvolutionDescriptor(&conv_desc));
-    CHECK_CUDNN(cudnnSetConvolution2dDescriptor(conv_desc, 0, 0, 1, 1, 1, 1, CUDNN_CROSS_CORRELATION, CUDNN_DATA_FLOAT));
-
-    // Create activation descriptor
-    cudnnActivationDescriptor_t activationDesc;
-    CHECK_CUDNN(cudnnCreateActivationDescriptor(&activationDesc));
-    CHECK_CUDNN(cudnnSetActivationDescriptor(activationDesc, CUDNN_ACTIVATION_TANH, CUDNN_PROPAGATE_NAN, 0.0));
-
-    // cross entropy loss
-    float *d_loss;
-    CHECK_CUDA(cudaMalloc(&d_loss, sizeof(float)));
-
-    // Allocate workspace
-    size_t workspaceSize = 0;
-    void* workSpace = nullptr;
-
-    auto calculateAndAllocateWorkspace = [&]() {
-        size_t temp_workspaceSize = 0;
-        cudnnConvolutionFwdAlgo_t fwdAlgo = CUDNN_CONVOLUTION_FWD_ALGO_GEMM;
-        cudnnConvolutionBwdFilterAlgo_t bwdFilterAlgo = CUDNN_CONVOLUTION_BWD_FILTER_ALGO_0;
-        cudnnConvolutionBwdDataAlgo_t bwdDataAlgo = CUDNN_CONVOLUTION_BWD_DATA_ALGO_0;
-
-        // Lambda to update workspace size
-        auto updateWorkspaceSize = [&](size_t size) {
-            workspaceSize = std::max(workspaceSize, size);
-        };
-
-        // Calculate workspace size for forward pass
-        CHECK_CUDNN(cudnnGetConvolutionForwardWorkspaceSize(cudnnHandle,
-                                                    x_desc,
-                                                    w1_desc,
-                                                    conv_desc,
-                                                    y_desc,
-                                                    fwdAlgo,
-                                                    &temp_workspaceSize));
-        updateWorkspaceSize(temp_workspaceSize);
-
-        // Calculate workspace size for backward filter (W2)
-        CHECK_CUDNN(cudnnGetConvolutionBackwardFilterWorkspaceSize(cudnnHandle,
-                                                                y_desc,
-                                                                y2_desc,
-                                                                conv_desc,
-                                                                w2_desc,
-                                                                bwdFilterAlgo,
-                                                                &temp_workspaceSize));
-        updateWorkspaceSize(temp_workspaceSize);
-
-        // Calculate workspace size for backward data (hidden layer)
-        CHECK_CUDNN(cudnnGetConvolutionBackwardDataWorkspaceSize(cudnnHandle,
-                                                                w2_desc,
-                                                                y2_desc,
-                                                                conv_desc,
-                                                                y_desc,
-                                                                bwdDataAlgo,
-                                                                &temp_workspaceSize));
-        updateWorkspaceSize(temp_workspaceSize);
-
-        // Calculate workspace size for backward filter (W1)
-        CHECK_CUDNN(cudnnGetConvolutionBackwardFilterWorkspaceSize(cudnnHandle,
-                                                                x_desc,
-                                                                y_desc,
-                                                                conv_desc,
-                                                                w1_desc,
-                                                                bwdFilterAlgo,
-                                                                &temp_workspaceSize));
-        updateWorkspaceSize(temp_workspaceSize);
-
-        // Allocate workspace with the maximum size required
-        if (workspaceSize > 0) {
-            if (workSpace) cudaFree(workSpace);
-            CHECK_CUDA(cudaMalloc(&workSpace, workspaceSize));
-        }
-
-        std::cout << "Allocated workspace size: " << workspaceSize << " bytes" << std::endl;
-    };
-
-    calculateAndAllocateWorkspace();
-
-    // Random indices generataion setup
-    curandState *devStates;
-    cudaMalloc((void **)&devStates, batch_size * sizeof(curandState));
-    setup_kernel<<<(batch_size + threadsPerBlock - 1) / threadsPerBlock, threadsPerBlock>>>(devStates, 2147483647);
-    
-
-
-    /**
-    * Part 3: Run the training loop for the neural network.
-    */
-    // Training loop
-    for (int i = 0; i < max_steps; ++i) {
-
-        // Generate Random Indices
-        std::cout << "Generating random indices for training data minibatch\n";
-        generate_indices_kernel<<<(batch_size + threadsPerBlock - 1) / threadsPerBlock, threadsPerBlock>>>(d_idx, devStates, batch_size, Xtr_size);
-
-        // Generate minibatch
-        std::cout << "Generating training data minibatch\n";
-        generate_training_minibatch<<<(batch_size + threadsPerBlock - 1) / threadsPerBlock, threadsPerBlock>>>(d_X, d_Y, d_Xtr, d_Ytr, d_idx, batch_size, block_size);
-        lookup_embeddings<<<(batch_size + threadsPerBlock - 1) / threadsPerBlock, threadsPerBlock>>>(d_embd, d_X, d_Xembd, batch_size, block_size, n_embed);
-   
-        CHECK_CUDNN(cudnnConvolutionForward(cudnnHandle, &alpha, x_desc, d_Xembd, w1_desc, d_W1, conv_desc,
-                                        CUDNN_CONVOLUTION_FWD_ALGO_GEMM, workSpace, workspaceSize, &beta, y_desc, d_Y1));
-        
-        // Add bias
-        CHECK_CUDNN(cudnnAddTensor(cudnnHandle, &alpha, b1_desc, d_b1, &alpha, y_desc, d_Y1));
-
-        // Apply tanh activation
-        CHECK_CUDNN(cudnnActivationForward(cudnnHandle, activationDesc, &alpha, y_desc, d_Y1, &beta, y_desc, d_Y1));
-
-        // Layer 2: Perform matrix multiplication (Y1 * W2), add bias B2
-
-        CHECK_CUDNN(cudnnConvolutionForward(cudnnHandle, &alpha, y_desc, d_Y1, w2_desc, d_W2, conv_desc,
-                                        CUDNN_CONVOLUTION_FWD_ALGO_GEMM, workSpace, workspaceSize, &beta, y2_desc, d_Y2));
-        CHECK_CUDNN(cudnnAddTensor(cudnnHandle, &alpha, b2_desc, d_b2, &alpha, y2_desc, d_Y2));
-
-        // Apply softmax
-        CHECK_CUDNN(cudnnSoftmaxForward(cudnnHandle, CUDNN_SOFTMAX_ACCURATE, CUDNN_SOFTMAX_MODE_CHANNEL,
-                                    &alpha, y2_desc, d_Y2, &beta, y2_desc, d_Y2));
-
-        // Compute cross-entropy loss 
-        // Launch the kernel
-        float h_loss = 0;
-        dim3 block(1);
-        dim3 grid(1);
-        crossEntropyLossKernel<<<grid, block>>>(d_Y2, d_Y, batch_size, vocab_size, d_loss);
-        CHECK_CUDA(cudaGetLastError());
-        CHECK_CUDA(cudaMemcpy(&h_loss, d_loss, sizeof(float), cudaMemcpyDeviceToHost));
-
-        // Print the loss
-        std::cout << "Cross-Entropy Loss: " << h_loss << std::endl;
-
-        // Backpropgation
-        // 1. Compute gradients for output layer
-        CHECK_CUDNN(cudnnSoftmaxBackward(cudnnHandle, CUDNN_SOFTMAX_ACCURATE, CUDNN_SOFTMAX_MODE_CHANNEL,
-                                        &alpha, y2_desc, d_Y2, y2_desc, d_Y2, &beta, y2_desc, d_dY2));
-
-        // Adjust d_dY2 based on true labels
-        adjustGradientsKernel<<<(batch_size + threadsPerBlock - 1) / threadsPerBlock, threadsPerBlock>>>(d_dY2, d_Y, batch_size, vocab_size);
-
-        // 2. Compute gradients for W2 and b2
-        CHECK_CUDNN(cudnnConvolutionBackwardFilter(cudnnHandle, &alpha, y_desc, d_Y1, y2_desc, d_dY2, conv_desc,
-                                                CUDNN_CONVOLUTION_BWD_FILTER_ALGO_0, workSpace, workspaceSize,
-                                                &beta, w2_desc, d_dW2));
-
-        CHECK_CUDNN(cudnnConvolutionBackwardBias(cudnnHandle, &alpha, y2_desc, d_dY2, &beta, b2_desc, d_db2));
-
-        // 3. Compute gradients for hidden layer
-        CHECK_CUDNN(cudnnConvolutionBackwardData(cudnnHandle, &alpha, w2_desc, d_W2, y2_desc, d_dY2, conv_desc,
-                                                CUDNN_CONVOLUTION_BWD_DATA_ALGO_0, workSpace, workspaceSize,
-                                                &beta, y_desc, d_dY1));
-
-        CHECK_CUDNN(cudnnActivationBackward(cudnnHandle, activationDesc, &alpha, y_desc, d_Y1, y_desc, d_dY1,
-                                            y_desc, d_Y1, &beta, y_desc, d_dY1));
-
-        // 4. Compute gradients for W1 and b1
-        CHECK_CUDNN(cudnnConvolutionBackwardFilter(cudnnHandle, &alpha, x_desc, d_Xembd, y_desc, d_dY1, conv_desc,
-                                                CUDNN_CONVOLUTION_BWD_FILTER_ALGO_0, workSpace, workspaceSize,
-                                                &beta, w1_desc, d_dW1));
-
-        CHECK_CUDNN(cudnnConvolutionBackwardBias(cudnnHandle, &alpha, y_desc, d_dY1, &beta, b1_desc, d_db1));
-
-        // 5. Compute gradients for embeddings
-        // First, we need to backpropagate through the embedding lookup
-        CHECK_CUDNN(cudnnConvolutionBackwardData(cudnnHandle, &alpha, w1_desc, d_W1, y_desc, d_dY1, conv_desc,
-                                                CUDNN_CONVOLUTION_BWD_DATA_ALGO_0, workSpace, workspaceSize,
-                                                &beta, x_desc, d_Xembd));
-
-        // Now compute gradients for the embedding matrix
-        computeEmbeddingGradients<<<(batch_size * block_size + threadsPerBlock - 1) / threadsPerBlock, threadsPerBlock>>>(d_Xembd, d_X, d_dEmbd, 
-                                                                    batch_size, block_size, n_embed, vocab_size);
-
-        // 6. Update weights and biases
-        updateParametersKernel<<<(vocab_size * n_hidden + (threadsPerBlock - 1)) / threadsPerBlock, threadsPerBlock>>>(d_W2, d_dW2, learning_rate, vocab_size * n_hidden);
-        updateParametersKernel<<<(vocab_size + threadsPerBlock - 1) / threadsPerBlock, threadsPerBlock>>>(d_b2, d_db2, learning_rate, vocab_size);
-        updateParametersKernel<<<(n_hidden * block_size * n_embed + (threadsPerBlock - 1)) / threadsPerBlock, threadsPerBlock>>>(d_W1, d_dW1, learning_rate, n_hidden * block_size * n_embed);
-        updateParametersKernel<<<(n_hidden + threadsPerBlock - 1) / threadsPerBlock, threadsPerBlock>>>(d_b1, d_db1, learning_rate, n_hidden);
-        updateParametersKernel<<<(vocab_size * n_embed + 255) / 256, 256>>>(d_embd, d_dEmbd, learning_rate, vocab_size * n_embed);
-
-        // Zero out the grandients
-        CHECK_CUDA(cudaMemset(d_dEmbd, 0, vocab_size * n_embed * sizeof(float)));
-        CHECK_CUDA(cudaMemset(d_dW1, 0, n_hidden * block_size * n_embed * sizeof(float)));
-        CHECK_CUDA(cudaMemset(d_db1, 0, n_hidden * sizeof(float)));
-        CHECK_CUDA(cudaMemset(d_dW2, 0, vocab_size * n_hidden * sizeof(float)));
-        CHECK_CUDA(cudaMemset(d_db2, 0, vocab_size * sizeof(float)));
-        CHECK_CUDA(cudaMemset(d_dY1, 0, batch_size * n_hidden * sizeof(float)));
-        CHECK_CUDA(cudaMemset(d_dY2, 0, batch_size * vocab_size * sizeof(float)));
-    }
-
-
-    // Clean up
-
-    CHECK_CUDNN(cudnnDestroyTensorDescriptor(x_desc));
-    CHECK_CUDNN(cudnnDestroyTensorDescriptor(y_desc));
-    CHECK_CUDNN(cudnnDestroyTensorDescriptor(b1_desc));
-    CHECK_CUDNN(cudnnDestroyFilterDescriptor(w1_desc));
-    CHECK_CUDNN(cudnnDestroyConvolutionDescriptor(conv_desc));
-    CHECK_CUDNN(cudnnDestroyActivationDescriptor(activationDesc));
-    
-    CHECK_CUDNN(cudnnDestroyTensorDescriptor(y2_desc));
-    CHECK_CUDNN(cudnnDestroyTensorDescriptor(b2_desc));
-    CHECK_CUDNN(cudnnDestroyFilterDescriptor(w2_desc));
-
-    free(Xtr);
-    free(Ytr);
-
-    cudaFree(d_dEmbd);
-    cudaFree(d_loss);
-    cudaFree(devStates);
-    cudaFree(d_Y1);
-    cudaFree(d_Y2);
-    cudaFree(d_X);
-    cudaFree(d_Y);
-    cudaFree(d_Xembd);
-    cudaFree(d_idx);
-    cudaFree(d_Xtr);
-    cudaFree(d_Ytr);
-    cudaFree(d_embd);
-    cudaFree(d_W1);
-    cudaFree(d_b1);
-    cudaFree(d_W2);
-    cudaFree(d_b2);
-    cudaFree(d_dW1);
-    cudaFree(d_db1);
-    cudaFree(d_dW2);
-    cudaFree(d_db2);
-    cudaFree(d_dY1);
-    cudaFree(d_dY2);
-    cudnnDestroy(cudnnHandle);
-    return 0;
 }
